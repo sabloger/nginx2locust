@@ -40,11 +40,10 @@ while (($line = fgets($handleLog)) !== false) {
         //______________________________________________________________________________________________________________
         // Data part
         key_exists('cnt', $curNode) ? $curNode['cnt']++ : $curNode['cnt'] = 1;
-
         if ($matches['stat'][0] == 200) {
-            key_exists('met', $curNode) ?: $curNode['met'] = $matches['met'][0];
-            key_exists('qs', $curNode) ?: $curNode['qs'] = $matches['qs'][0];
-            key_exists('post', $curNode) ?: $matches['post'][0] == '-' ? $curNode['post'] = "" : $curNode['post'] = $matches['post'][0];
+            empty($matches['met'][0]) ? $curNode['met'] = "" : $curNode['met'] = $matches['met'][0];
+            empty($matches['qs'][0]) ? $curNode['qs'] = "" : $curNode['qs'] = $matches['qs'][0];
+            empty($matches['post'][0]) ?: $matches['post'][0] == '-' ? $curNode['post'] = "" : $curNode['post'] = $matches['post'][0];
         }
 
     } catch (\Exception $exception) {
@@ -53,36 +52,48 @@ while (($line = fgets($handleLog)) !== false) {
         print_r($line);
         throw $exception;
     }
-//        die(json_encode($matches, JSON_PRETTY_PRINT));
 }
 fclose($handleLog);
 
-$handleReport = fopen($argv[2], "w");
+foreach ($results as $day => &$apis) {
+    foreach ($apis as $api => $data) {
+        if (!is_string($api)) continue;
+        $data['uri'] = $api;
+        $results[$day][] = $data;
+        unset($results[$day][$api]);
+    }
+    array_multisort($apis);
+}
+
 
 if (array_search("--locust", $argv) !== false) {
+    $handleReport = fopen($argv[2], "w");
     print_r($days);
-    $i = readline("Witch day?\n");
-    foreach ($results[$days[$i]] as $uri => $data) {
-        if(!key_exists('met',$data)) continue;
+    $i = readline("Witch day? \n");
+    foreach ($results[$days[$i]] as $data) {
+        if (!key_exists('met', $data)) continue;
         switch (strtolower($data['met'])) {
             case 'post':
-                fputs($handleReport, genPostLocust($uri, $data) . "\n\n");
+                fputs($handleReport, genPostLocust($data['uri'], $data) . "\n\n");
                 break;
             case 'get':
-                fputs($handleReport, genGetLocust($uri, $data) . "\n\n");
+                fputs($handleReport, genGetLocust($data['uri'], $data) . "\n\n");
                 break;
             default:
-                echo "\n\nNadaram ke!!!: " . $data['met'];
+                echo "\n\n Method!!!: " . $data['met'];
         }
     }
-    die;
-} else
-    fputs($handleReport, json_encode($results, JSON_PRETTY_PRINT));
+    fclose($handleReport);
+}
+
+$handleJson = fopen($argv[2] . ".json", "w");
+fputs($handleJson, json_encode($results, JSON_PRETTY_PRINT));
+fclose($handleJson);
+
 
 function getCookies()
 {
     global $argv;
-//    if(array_search("--locust-cookie=", $argv) !== false);
     $res = "";
     array_walk($argv, function ($item) use (&$res) {
         if (strpos($item, "--locust-cookie=") === 0)
@@ -110,33 +121,23 @@ PYTHON
 
 function genPostLocust($uri, $data)
 {
-    $post = "";
-    if ($data['post']) {
-        $param = explode('&', $data['post']);
-        foreach ($param as &$item) {
-            $p = explode('=', $item);
-            if (count($p) == 1)
-                $p[1] = "";
-            $item = implode('":"', $p);
-        }
-        $post = implode('","', $param);
-//        $post = str_replace('&', '","', $post);
-//        $post = str_replace('=', '":"', $post);
-        $post = ',{"' . $post . '"}';
-    }
+//    $post = empty($data['post']) ? '' : ',"' . $data['post'].'"';
+
+    $params = empty($data['qs']) ? '' : '?' . $data['qs'];
+    empty($params) ? empty($data['post']) ?: $params = '?' . $data['post'] : $params .= '&' . $data['post'];
+
 
     return sprintf(<<<PYTHON
     @task(%d)
     def %s(self):
         params = "%s"
-        self.client.post("%s"+params %s %s)
+        self.client.post("%s"+params %s)
 PYTHON
         ,
         $data['cnt'],
         str_replace(['/', '-'], '_', substr($uri, 1)),
-        !$data['qs'] ? '' : '?' . $data['qs'],
+        $params,
         $uri,
-        $post,
         getCookies()
     );
 }
